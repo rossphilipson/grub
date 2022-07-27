@@ -57,6 +57,7 @@ GROUPS["ieee1275"]   = [ "i386_ieee1275", "sparc64_ieee1275", "powerpc_ieee1275"
 GROUPS["uboot"] = [ "arm_uboot" ]
 GROUPS["xen"]  = [ "i386_xen", "x86_64_xen" ]
 GROUPS["coreboot"]  = [ "i386_coreboot", "arm_coreboot" ]
+GROUPS["gexec"]  = [ "i386_gexec" ]
 
 # emu is a special case so many core functionality isn't needed on this platform
 GROUPS["noemu"]   = GRUB_PLATFORMS[:]; GROUPS["noemu"].remove("emu")
@@ -589,6 +590,7 @@ def platform_conditional(platform, closure):
 #    enable = x86_efi;
 #    enable = i386_ieee1275;
 #    enable = i386_coreboot;
+#    enable = i386_gexec;
 #  };
 #
 def foreach_enabled_platform(defn, closure):

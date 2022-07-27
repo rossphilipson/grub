@@ -127,6 +127,7 @@ EXTRA_DIST += tests/dfly-mbr-mbexample.mbr.img.gz
 EXTRA_DIST += tests/dfly-mbr-mbexample.dfly.img.gz
 
 EXTRA_DIST += coreboot.cfg
+EXTRA_DIST += gexec.cfg
 
 EXTRA_DIST += tests/file_filter/file
 EXTRA_DIST += tests/file_filter/file.gz

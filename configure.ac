@@ -176,6 +176,7 @@ case "$target_cpu"-"$platform" in
   i386-multiboot) ;;
   i386-coreboot) ;;
   i386-linuxbios) platform=coreboot ;;
+  i386-gexec) ;;
   i386-ieee1275) ;;
   i386-qemu) ;;
   powerpc-ieee1275) ;;
@@ -238,6 +239,7 @@ esac
 
 case "$platform" in
   coreboot)	machine_CPPFLAGS="$machine_CPPFLAGS -DGRUB_MACHINE_COREBOOT=1" ;;
+  gexec)	machine_CPPFLAGS="$machine_CPPFLAGS -DGRUB_MACHINE_GEXEC=1" ;;
   multiboot)	machine_CPPFLAGS="$machine_CPPFLAGS -DGRUB_MACHINE_MULTIBOOT=1" ;;
   efi)		machine_CPPFLAGS="$machine_CPPFLAGS -DGRUB_MACHINE_EFI=1" ;;
   xen)		machine_CPPFLAGS="$machine_CPPFLAGS -DGRUB_MACHINE_XEN=1" ;;
@@ -1993,6 +1995,7 @@ AM_CONDITIONAL([COND_i386_efi], [test x$target_cpu = xi386 -a x$platform = xefi]
 AM_CONDITIONAL([COND_i386_qemu], [test x$target_cpu = xi386 -a x$platform = xqemu])
 AM_CONDITIONAL([COND_i386_ieee1275], [test x$target_cpu = xi386 -a x$platform = xieee1275])
 AM_CONDITIONAL([COND_i386_coreboot], [test x$target_cpu = xi386 -a x$platform = xcoreboot])
+AM_CONDITIONAL([COND_i386_gexec], [test x$target_cpu = xi386 -a x$platform = xgexec])
 AM_CONDITIONAL([COND_i386_multiboot], [test x$target_cpu = xi386 -a x$platform = xmultiboot])
 AM_CONDITIONAL([COND_i386_xen], [test x$target_cpu = xi386 -a x$platform = xxen])
 AM_CONDITIONAL([COND_i386_xen_pvh], [test x$target_cpu = xi386 -a x$platform = xxen_pvh])

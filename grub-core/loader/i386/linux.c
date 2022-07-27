@@ -83,6 +83,11 @@ static grub_efi_uintn_t efi_mmap_size;
 static const grub_size_t efi_mmap_size = 0;
 #endif
 
+#ifdef GRUB_MACHINE_GEXEC
+/* TODO set in startup.S, copy over bits to linux_params below */
+void *grub_kexec_params;
+#endif
+
 /* FIXME */
 #if 0
 struct idt_descriptor
