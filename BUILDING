@@ -11,9 +11,16 @@ export LDFLAGS='-Wl,-z,relro'
 
 Step 2:
 
-./bootstrap
+Switch to the type of Linux boot to do:
+
+./switch.sh -u # UEFI direct Linux boot
+./switch.sh -l # Legacy Linux boot
 
 Step 3:
+
+./bootstrap
+
+Step 4:
 
 bootstrap creates:
 grub-core/lib/gnulib/Makefile.am
@@ -32,13 +39,6 @@ index b7c5e60e1..bd3621930 100644
 -AM_CFLAGS =
 +AM_CPPFLAGS = $(HOST_CPPFLAGS)
 +AM_CFLAGS = $(HOST_CFLAGS)
-
-Step 4:
-
-Switch to the type of Linux boot to do:
-
-./switch.sh -u # UEFI direct Linux boot
-./switch.sh -l # Legacy Linux boot
 
 Step 5:
 
