@@ -822,8 +822,7 @@ grub_linux_boot (void)
       if (err != GRUB_ERR_NONE)
 	return err;
 
-      dlinfo = (struct grub_slr_entry_dl_info *)
-                       grub_slr_next_entry_by_tag (slrt, NULL, GRUB_SLR_ENTRY_DL_INFO);
+      dlinfo = grub_slr_next_entry_by_tag (slrt, NULL, GRUB_SLR_ENTRY_DL_INFO);
       dl_entry ((grub_uint64_t)&dlinfo->bl_context);
 
       /* If this returns, something failed miserably */

@@ -551,86 +551,84 @@ static void
 setup_slrt_policy (struct grub_slaunch_params *slparams,
                    struct grub_txt_os_mle_data *os_mle_data)
 {
-  struct grub_slr_policy_entry *entry =
-    (struct grub_slr_policy_entry *)((grub_uint8_t *)slr_policy_staging +
-                                     sizeof(struct grub_slr_entry_policy));
   struct linux_kernel_params *boot_params = slparams->boot_params;
   struct grub_efi_info *efi_info;
+  int i = 0;
 
   /* A bit of work to extract the v2.08 EFI info from the linux params */
   efi_info = (struct grub_efi_info *)((grub_uint8_t *)&(boot_params->v0208)
                                        + 2*sizeof(grub_uint32_t));
 
   /* the SLR table should be measured too, at least parts of it */
-  entry->pcr = 18;
-  entry->entity_type = GRUB_SLR_ET_SLRT;
-  entry->entity = slparams->slr_table_base;
-  entry->flags |= GRUB_SLR_POLICY_IMPLICIT_SIZE;
-  grub_strcpy (&entry->evt_info[0], "Measured SLR Table");
-  entry++;
+  slr_policy_staging->policy_entries[i].pcr = 18;
+  slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_SLRT;
+  slr_policy_staging->policy_entries[i].entity = slparams->slr_table_base;
+  slr_policy_staging->policy_entries[i].flags |= GRUB_SLR_POLICY_IMPLICIT_SIZE;
+  grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured SLR Table");
+  i++;
 
   /* boot params have everything needed to setup policy except OS2MLE data */
-  entry->pcr = 18;
-  entry->entity_type = GRUB_SLR_ET_BOOT_PARAMS;
-  entry->entity = (grub_uint64_t)boot_params;
-  entry->size = GRUB_PAGE_SIZE;
-  grub_strcpy (&entry->evt_info[0], "Measured boot parameters");
-  entry++;
+  slr_policy_staging->policy_entries[i].pcr = 18;
+  slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_BOOT_PARAMS;
+  slr_policy_staging->policy_entries[i].entity = (grub_uint64_t)boot_params;
+  slr_policy_staging->policy_entries[i].size = GRUB_PAGE_SIZE;
+  grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured boot parameters");
+  i++;
 
   if (boot_params->setup_data)
     {
-      entry->pcr = 18;
-      entry->entity_type = GRUB_SLR_ET_SETUP_DATA;
-      entry->entity = boot_params->setup_data;
-      entry->flags |= GRUB_SLR_POLICY_IMPLICIT_SIZE;
-      grub_strcpy (&entry->evt_info[0], "Measured Kernel setup_data");
+      slr_policy_staging->policy_entries[i].pcr = 18;
+      slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_SETUP_DATA;
+      slr_policy_staging->policy_entries[i].entity = boot_params->setup_data;
+      slr_policy_staging->policy_entries[i].flags |= GRUB_SLR_POLICY_IMPLICIT_SIZE;
+      grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured Kernel setup_data");
     }
   else
-      entry->entity_type = GRUB_SLR_ET_UNUSED;
-  entry++;
+      slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_UNUSED;
+  i++;
 
-  entry->pcr = 18;
-  entry->entity_type = GRUB_SLR_ET_CMDLINE;
+  slr_policy_staging->policy_entries[i].pcr = 18;
+  slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_CMDLINE;
   /* TODO the cmdline ptr can have hi bits but for now assume always < 32G */
-  entry->entity = boot_params->cmd_line_ptr;
-  entry->size = boot_params->cmdline_size;
-  grub_strcpy (&entry->evt_info[0], "Measured Kernel command line");
-  entry++;
+  slr_policy_staging->policy_entries[i].entity = boot_params->cmd_line_ptr;
+  slr_policy_staging->policy_entries[i].size = boot_params->cmdline_size;
+  grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured Kernel command line");
+  i++;
 
   if (!grub_memcmp(&efi_info->efi_signature, "EL64", sizeof(grub_uint32_t)))
     {
       grub_uint64_t mmap_hi;
 
-      entry->pcr = 18;
-      entry->entity_type = GRUB_SLR_ET_UEFI_MEMMAP;
-      entry->entity = efi_info->efi_mmap;
+      slr_policy_staging->policy_entries[i].pcr = 18;
+      slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_UEFI_MEMMAP;
+      slr_policy_staging->policy_entries[i].entity = efi_info->efi_mmap;
       mmap_hi =  efi_info->efi_mmap_hi;
-      entry->entity |= mmap_hi << 32;
-      entry->size = efi_info->efi_mmap_size;
-      grub_strcpy (&entry->evt_info[0], "Measured EFI memory map");
+      slr_policy_staging->policy_entries[i].entity |= mmap_hi << 32;
+      slr_policy_staging->policy_entries[i].size = efi_info->efi_mmap_size;
+      grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured EFI memory map");
     }
   else
-      entry->entity_type = GRUB_SLR_ET_UNUSED;
-  entry++;
+      slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_UNUSED;
+  i++;
 
   if (boot_params->ramdisk_image)
     {
-      entry->pcr = 17;
-      entry->entity_type = GRUB_SLR_ET_RAMDISK;
+      slr_policy_staging->policy_entries[i].pcr = 17;
+      slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_RAMDISK;
       /* TODO the initrd image and size can have hi bits but for now assume always < 32G */
-      entry->entity = boot_params->ramdisk_image;
-      entry->size = boot_params->ramdisk_size;
-      grub_strcpy (&entry->evt_info[0], "Measured Kernel initrd");
+      slr_policy_staging->policy_entries[i].entity = boot_params->ramdisk_image;
+      slr_policy_staging->policy_entries[i].size = boot_params->ramdisk_size;
+      grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured Kernel initrd");
     }
   else
-    entry->entity_type = GRUB_SLR_ET_UNUSED;
-  entry++;
+    slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_UNUSED;
+  i++;
 
-  entry->pcr = 18;
-  entry->entity_type = GRUB_SLR_ET_TXT_OS2MLE;
-  entry->entity = (grub_uint64_t)os_mle_data;
-  entry->size = sizeof(struct grub_txt_os_mle_data);
-  grub_strcpy (&entry->evt_info[0], "Measured TXT OS-MLE data");
+  slr_policy_staging->policy_entries[i].pcr = 18;
+  slr_policy_staging->policy_entries[i].entity_type = GRUB_SLR_ET_TXT_OS2MLE;
+  slr_policy_staging->policy_entries[i].entity = (grub_uint64_t)os_mle_data;
+  slr_policy_staging->policy_entries[i].size = sizeof(struct grub_txt_os_mle_data);
+  grub_strcpy (slr_policy_staging->policy_entries[i].evt_info, "Measured TXT OS-MLE data");
 }
 
 static void
@@ -1067,9 +1065,11 @@ grub_txt_boot_prepare (struct grub_slaunch_params *slparams)
   slr_dl_info_staging.bl_context.bootloader = GRUB_SLR_BOOTLOADER_GRUB;
   slr_dl_info_staging.bl_context.context = (grub_uint64_t)slparams;
   slr_dl_info_staging.dl_handler = (grub_uint64_t)dl_entry_trampoline;
+  slr_dl_info_staging.dlme_size = slparams->mle_size;
+  slr_dl_info_staging.dlme_base = slparams->mle_start;
+  slr_dl_info_staging.dlme_entry = mle_header->entry_point;
   slr_dl_info_staging.dce_base = slparams->dce_base;
   slr_dl_info_staging.dce_size = slparams->dce_size;
-  slr_dl_info_staging.dlme_entry = mle_header->entry_point;
 
   /* Final setup of SLR table */
   txt_heap = grub_txt_get_heap ();

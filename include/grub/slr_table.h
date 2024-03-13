@@ -76,7 +76,7 @@
 #define GRUB_SLR_ET_UNUSED		0xffff
 
 /*
- * Primary SLR Table Header
+ * Primary Secure Launch Resource Table Header
  */
 struct grub_slr_table
 {
@@ -85,7 +85,7 @@ struct grub_slr_table
   grub_uint16_t architecture;
   grub_uint32_t size;
   grub_uint32_t max_size;
-  /* entries[] */
+  /* table entries */
 } GRUB_PACKED;
 
 /*
@@ -103,9 +103,14 @@ struct grub_slr_entry_hdr
 struct grub_slr_bl_context
 {
   grub_uint16_t bootloader;
-  grub_uint16_t reserved;
+  grub_uint16_t reserved[3];
   grub_uint64_t context;
 } GRUB_PACKED;
+
+/*
+ * Dynamic Launch Callback Function type
+ */
+typedef void (*grub_dl_handler_func)(struct slr_bl_context *bl_context);
 
 /*
  * DRTM Dynamic Launch Configuration
@@ -113,11 +118,13 @@ struct grub_slr_bl_context
 struct grub_slr_entry_dl_info
 {
   struct grub_slr_entry_hdr hdr;
+  grub_uint32_t dce_size;
+  grub_uint64_t dce_base;
+  grub_uint64_t dlme_size;
+  grub_uint64_t dlme_base;
+  grub_uint64_t dlme_entry;
   struct grub_slr_bl_context bl_context;
   grub_uint64_t dl_handler;
-  grub_uint64_t dce_base;
-  grub_uint32_t dce_size;
-  grub_uint64_t dlme_entry;
 } GRUB_PACKED;
 
 /*
@@ -127,20 +134,9 @@ struct grub_slr_entry_log_info
 {
   struct grub_slr_entry_hdr hdr;
   grub_uint16_t format;
-  grub_uint16_t reserved;
-  grub_uint64_t addr;
+  grub_uint16_t reserved[3];
   grub_uint32_t size;
-} GRUB_PACKED;
-
-/*
- * DRTM Measurement Policy
- */
-struct grub_slr_entry_policy
-{
-  struct grub_slr_entry_hdr hdr;
-  grub_uint16_t revision;
-  grub_uint16_t nr_entries;
-  /* policy_entries[] */
+  grub_uint64_t addr;
 } GRUB_PACKED;
 
 /*
@@ -152,9 +148,20 @@ struct grub_slr_policy_entry
   grub_uint16_t entity_type;
   grub_uint16_t flags;
   grub_uint16_t reserved;
-  grub_uint64_t entity;
   grub_uint64_t size;
+  grub_uint64_t entity;
   char evt_info[GRUB_TPM_EVENT_INFO_LENGTH];
+} GRUB_PACKED;
+
+/*
+ * DRTM Measurement Policy
+ */
+struct grub_slr_entry_policy
+{
+  struct grub_slr_entry_hdr hdr;
+  grub_uint16_t revision;
+  grub_uint16_t nr_entries;
+  struct grub_slr_policy_entry policy_entries[];
 } GRUB_PACKED;
 
 /*
@@ -179,57 +186,48 @@ struct grub_slr_txt_mtrr_state
 struct grub_slr_entry_intel_info
 {
   struct grub_slr_entry_hdr hdr;
+  grub_uint16_t reserved[2];
   grub_uint64_t saved_misc_enable_msr;
   struct grub_slr_txt_mtrr_state saved_bsp_mtrrs;
 } GRUB_PACKED;
 
 /*
- * AMD SKINIT Info table
+ * UEFI config measurement entry
  */
-struct grub_slr_entry_amd_info
+struct grub_slr_uefi_cfg_entry
 {
-  struct grub_slr_entry_hdr hdr;
+  grub_uint16_t pcr;
+  grub_uint16_t reserved;
+  grub_uint32_t size;
+  grub_uint64_t cfg; /* address or value */
+  char evt_info[GRUB_TPM_EVENT_INFO_LENGTH];
 } GRUB_PACKED;
 
 /*
- * ARM DRTM Info table
+ * UEFI config measurements
  */
-struct grub_slr_entry_arm_info
-{
-  struct grub_slr_entry_hdr hdr;
-} GRUB_PACKED;
-
 struct grub_slr_entry_uefi_config
 {
   struct grub_slr_entry_hdr hdr;
   grub_uint16_t revision;
   grub_uint16_t nr_entries;
-  /* uefi_cfg_entries[] */
-} GRUB_PACKED;
-
-struct grub_slr_uefi_cfg_entry
-{
-  grub_uint16_t pcr;
-  grub_uint16_t reserved;
-  grub_uint64_t cfg; /* address or value */
-  grub_uint32_t size;
-  char evt_info[GRUB_TPM_EVENT_INFO_LENGTH];
+  struct grub_slr_uefi_cfg_entry uefi_cfg_entries[];
 } GRUB_PACKED;
 
 static inline void *
-grub_slr_end_of_entrys (struct grub_slr_table *table)
+grub_slr_end_of_entries (struct grub_slr_table *table)
 {
-  return (void *)(((grub_uint8_t *)table) + table->size);
+  return (void *)((grub_uint8_t *)table + table->size);
 }
 
-static inline struct grub_slr_entry_hdr *
+static inline void *
 grub_slr_next_entry (struct grub_slr_table *table,
                      struct grub_slr_entry_hdr *curr)
 {
   struct grub_slr_entry_hdr *next = (struct grub_slr_entry_hdr *)
                                     ((grub_uint8_t *)curr + curr->size);
 
-  if ((void *)next >= grub_slr_end_of_entrys(table))
+  if ((void *)next >= grub_slr_end_of_entries(table))
     return NULL;
   if (next->tag == GRUB_SLR_ENTRY_END)
     return NULL;
@@ -237,7 +235,7 @@ grub_slr_next_entry (struct grub_slr_table *table,
   return next;
 }
 
-static inline struct grub_slr_entry_hdr *
+static inline void *
 grub_slr_next_entry_by_tag (struct grub_slr_table *table,
                             struct grub_slr_entry_hdr *entry,
                             grub_uint16_t tag)

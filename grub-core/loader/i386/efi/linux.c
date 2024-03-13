@@ -257,8 +257,7 @@ static void grub_slaunch_update_slrt_policy (struct linux_kernel_params *params)
   struct grub_slr_policy_entry *entry;
   grub_uint16_t i;
 
-  slr_policy = (struct grub_slr_entry_policy *)
-    grub_slr_next_entry_by_tag (slrt, NULL, GRUB_SLR_ENTRY_ENTRY_POLICY);
+  slr_policy = grub_slr_next_entry_by_tag (slrt, NULL, GRUB_SLR_ENTRY_ENTRY_POLICY);
 
   if (!slr_policy)
     grub_error (GRUB_ERR_BAD_ARGUMENT, N_("SLRT missing security policy"));
