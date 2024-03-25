@@ -25,11 +25,14 @@
 #include <grub/loader.h>
 #include <grub/mm.h>
 #include <grub/types.h>
+#include <grub/slr_table.h>
+#include <grub/slaunch.h>
 #include <grub/efi/efi.h>
 #include <grub/efi/fdtload.h>
 #include <grub/efi/memory.h>
 #include <grub/efi/pe32.h>
 #include <grub/efi/sb.h>
+#include <grub/x86_64/efi/memory.h>
 #include <grub/i18n.h>
 #include <grub/lib/cmdline.h>
 #include <grub/verify.h>
@@ -54,6 +57,20 @@ static bool initrd_use_loadfile2 = false;
 
 static grub_guid_t load_file2_guid = GRUB_EFI_LOAD_FILE2_PROTOCOL_GUID;
 static grub_guid_t device_path_guid = GRUB_EFI_DEVICE_PATH_GUID;
+
+#define GRUB_EFI_SLAUNCH_TPM_EVT_LOG_PAGES	8
+#define GRUB_EFI_MLE_AP_WAKE_BLOCK_PAGES	20
+#define GRUB_EFI_SLAUNCH_TPM_EVT_LOG_SIZE	(GRUB_EFI_SLAUNCH_TPM_EVT_LOG_PAGES * GRUB_EFI_PAGE_SIZE)
+#define GRUB_EFI_MLE_AP_WAKE_BLOCK_SIZE		(GRUB_EFI_MLE_AP_WAKE_BLOCK_PAGES * GRUB_EFI_PAGE_SIZE)
+#define OFFSET_OF(x, y) ((grub_size_t)((grub_uint8_t *)(&(y)->x) - (grub_uint8_t *)(y)))
+static struct grub_slaunch_params slparams = {0};
+
+/* TODO define extern here since bringing in txt.h causes issues */
+#define GRUB_TXT_PMR_ALIGN_SHIFT	21
+#define GRUB_TXT_PMR_ALIGN		(1 << GRUB_TXT_PMR_ALIGN_SHIFT)
+extern grub_uint32_t grub_txt_get_mle_ptab_size (grub_uint32_t mle_size);
+extern void grub_txt_setup_mle_ptab (struct grub_slaunch_params *slparams);
+extern grub_err_t grub_txt_boot_prepare (struct grub_slaunch_params *slparams);
 
 static initrd_media_device_path_t initrd_lf2_device_path = {
   {
@@ -86,6 +103,37 @@ grub_efi_initrd_load_file2 (grub_efi_load_file2_t *this,
 static grub_efi_load_file2_t initrd_lf2 = {
   grub_efi_initrd_load_file2
 };
+
+static void
+grub_slaunch_update_slrt_policy (grub_uint64_t initrd_base, grub_uint64_t initrd_size)
+{
+  struct grub_slr_table *slrt = (struct grub_slr_table *)slparams.slr_table_base;
+  struct grub_slr_entry_policy *slr_policy;
+  struct grub_slr_policy_entry *entry;
+  grub_uint16_t i;
+
+  slr_policy = grub_slr_next_entry_by_tag (slrt, NULL, GRUB_SLR_ENTRY_ENTRY_POLICY);
+
+  if (!slr_policy)
+    grub_error (GRUB_ERR_BAD_ARGUMENT, N_("SLRT missing security policy"));
+
+  entry = (struct grub_slr_policy_entry *)((grub_uint8_t *)slr_policy +
+           sizeof(struct grub_slr_entry_policy));
+
+  for (i = 0; i < slr_policy->nr_entries; i++, entry++)
+    {
+      if (entry->entity_type == GRUB_SLR_ET_UNUSED)
+        {
+          entry->pcr = 17;
+          entry->entity_type = GRUB_SLR_ET_RAMDISK;
+          /* TODO the initrd image and size can have hi bits but for now assume always < 32G */
+          entry->entity = initrd_base;
+          entry->size = initrd_size;
+          grub_strcpy (&entry->evt_info[0], "Measured Kernel initrd");
+          break;
+        }
+    }
+}
 
 grub_err_t
 grub_arch_efi_linux_load_image_header (grub_file_t file,
@@ -362,6 +410,9 @@ grub_efi_initrd_load_file2 (grub_efi_load_file2_t *this,
   if (grub_initrd_load (&initrd_ctx, buffer))
     status = GRUB_EFI_DEVICE_ERROR;
 
+  if (grub_slaunch_platform_type () == SLP_INTEL_TXT)
+    grub_slaunch_update_slrt_policy ((grub_uint64_t)buffer, initrd_size);
+
   grub_initrd_close (&initrd_ctx);
   return status;
 }
@@ -444,12 +495,124 @@ grub_cmd_initrd (grub_command_t cmd __attribute__ ((unused)),
   initrd_end = initrd_start + initrd_size;
   grub_dprintf ("linux", "[addr=%p, size=0x%x]\n",
 		(void *) initrd_start, initrd_size);
+
+  if (grub_slaunch_platform_type () == SLP_INTEL_TXT)
+    grub_slaunch_update_slrt_policy (initrd_start, initrd_size);
 #endif
 
  fail:
   grub_initrd_close (&initrd_ctx);
 
   return grub_errno;
+}
+
+static void *
+grub_efi_slaunch_setup_slmem (grub_uint32_t *slmem_size_out)
+{
+  slparams.boot_type = GRUB_SL_BOOT_TYPE_EFI;
+  slparams.boot_params = (struct linux_kernel_params *)kernel_addr;;
+  grub_uint8_t *slmem;
+  grub_uint32_t slmem_pages =
+     1 + GRUB_EFI_SLAUNCH_TPM_EVT_LOG_PAGES + GRUB_EFI_MLE_AP_WAKE_BLOCK_PAGES;
+  grub_uint32_t slmem_size =
+     GRUB_EFI_PAGE_SIZE + GRUB_EFI_SLAUNCH_TPM_EVT_LOG_SIZE + GRUB_EFI_MLE_AP_WAKE_BLOCK_SIZE;
+
+  slmem = grub_efi_allocate_pages_real (GRUB_EFI_MAX_USABLE_ADDRESS,
+                                        slmem_pages,
+                                        GRUB_EFI_ALLOCATE_MAX_ADDRESS,
+                                        GRUB_EFI_LOADER_DATA);
+  if (!slmem)
+    return NULL;;
+
+  grub_memset (slmem, 0, slmem_size);
+
+  slparams.slr_table_base = (grub_uint64_t)slmem;
+  slparams.slr_table_size = GRUB_EFI_PAGE_SIZE;
+  slparams.slr_table_mem = slmem;
+
+  slparams.tpm_evt_log_base = (grub_uint64_t)(slmem + GRUB_EFI_PAGE_SIZE);
+  slparams.tpm_evt_log_size = GRUB_EFI_SLAUNCH_TPM_EVT_LOG_SIZE;
+
+  slparams.ap_wake_block = (grub_uint32_t)(grub_uint64_t)(slmem + GRUB_EFI_PAGE_SIZE + GRUB_EFI_SLAUNCH_TPM_EVT_LOG_SIZE);
+  slparams.ap_wake_block_size = GRUB_EFI_MLE_AP_WAKE_BLOCK_SIZE;
+
+  *slmem_size_out = slmem_size;
+  return slmem;
+}
+
+static grub_err_t
+grub_efi_slaunch_setup_txt (void)
+{
+  grub_guid_t slrt_guid = GRUB_UEFI_SLR_TABLE_GUID;
+  struct linux_kernel_params *lh = (struct linux_kernel_params *)kernel_addr;;
+  struct linux_kernel_info kernel_info;
+  grub_efi_physical_address_t requested;
+  grub_efi_boot_services_t *b;
+  grub_ssize_t start;
+  grub_err_t err;
+  grub_efi_status_t status;
+  void *addr;
+
+  /* Allocate page tables for TXT just in front of the kernel image */
+  slparams.mle_ptab_size = grub_txt_get_mle_ptab_size (kernel_size);
+  slparams.mle_ptab_size = ALIGN_UP (slparams.mle_ptab_size, GRUB_TXT_PMR_ALIGN);
+  requested = ALIGN_UP (((grub_uint64_t)kernel_addr - slparams.mle_ptab_size),
+                          GRUB_TXT_PMR_ALIGN);
+
+  addr = grub_efi_allocate_pages_real (requested,
+                                       slparams.mle_ptab_size/GRUB_EFI_PAGE_SIZE,
+                                       GRUB_EFI_ALLOCATE_ADDRESS,
+                                       GRUB_EFI_LOADER_DATA);
+  if (!addr)
+    {
+      grub_error (GRUB_ERR_OUT_OF_MEMORY, N_("out of memory"));
+      return GRUB_ERR_OUT_OF_MEMORY;
+    }
+
+  slparams.mle_ptab_mem = addr;
+  slparams.mle_ptab_target = (grub_uint64_t)addr;
+
+  slparams.mle_start = (grub_uint64_t)kernel_addr;
+  slparams.mle_size = kernel_size;
+
+  /* Setup the TXT ACM page tables */
+  grub_txt_setup_mle_ptab (&slparams);
+
+  /* Locate the MLE header offset in kernel_info section */
+  start = (lh->setup_sects + 1) * 512;
+
+  grub_memcpy ((void *)&kernel_info,
+               (char *)kernel_addr + start + grub_le_to_cpu32 (lh->kernel_info_offset),
+               sizeof (struct linux_kernel_info));
+
+  if (OFFSET_OF (mle_header_offset, &kernel_info) >=
+                 grub_le_to_cpu32 (kernel_info.size))
+    {
+      err = grub_error (GRUB_ERR_BAD_OS, N_("not slaunch kernel: lack of mle_header_offset"));
+      goto fail;
+    }
+
+  slparams.mle_header_offset = grub_le_to_cpu32 (kernel_info.mle_header_offset);
+
+  /* Final stage for secure launch, setup TXT and install the SLR table */
+  err = grub_txt_boot_prepare (&slparams);
+  if (err != GRUB_ERR_NONE)
+    goto fail;
+
+  b = grub_efi_system_table->boot_services;
+  status = b->install_configuration_table (&slrt_guid, (void *)slparams.slr_table_base);
+  if (status != GRUB_EFI_SUCCESS)
+    {
+      err = grub_error (GRUB_ERR_BAD_OS, "cannot load image");
+      goto fail;
+    }
+
+  return GRUB_ERR_NONE;
+
+fail:
+
+  grub_efi_free_pages ((grub_addr_t) addr, slparams.mle_ptab_size);
+  return err;
 }
 
 static grub_err_t
@@ -459,6 +622,8 @@ grub_cmd_linux (grub_command_t cmd __attribute__ ((unused)),
   grub_file_t file = 0;
   struct linux_arch_kernel_header lh;
   grub_err_t err;
+  void *slmem = NULL;
+  grub_uint32_t slmem_size = 0;
 
   grub_dl_ref (my_mod);
 
@@ -548,6 +713,17 @@ fallback:
   if (err)
     goto fail;
 
+  if (grub_slaunch_platform_type () == SLP_INTEL_TXT)
+    {
+      slmem = grub_efi_slaunch_setup_slmem (&slmem_size);
+      if (!slmem)
+        goto fail;
+
+      err= grub_efi_slaunch_setup_txt ();
+      if (err != GRUB_ERR_NONE)
+        goto fail;
+    }
+
   if (grub_errno == GRUB_ERR_NONE)
     {
       grub_loader_set (grub_linux_boot, grub_linux_unload, 0);
@@ -566,6 +742,16 @@ fail:
 
   if (linux_args && !loaded)
     grub_free (linux_args);
+
+  if (grub_slaunch_platform_type () == SLP_INTEL_TXT)
+    {
+      if (slmem && slmem_size)
+        grub_efi_free_pages ((grub_addr_t) slmem, slmem_size);
+      if (slparams.mle_ptab_mem)
+        grub_efi_free_pages ((grub_addr_t) slparams.mle_ptab_mem,
+                             slparams.mle_ptab_size);
+
+    }
 
   if (kernel_addr && !loaded)
     grub_efi_free_pages ((grub_addr_t) kernel_addr,
